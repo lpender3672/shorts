@@ -5,8 +5,8 @@ import numba
 # conways game of life
 
 # constants
-WIDTH = 800
-HEIGHT = 600
+WIDTH = 1920
+HEIGHT = 1080
 subdivision_size = 10
 FPS = 5
 
@@ -43,7 +43,15 @@ def apply_rules(screen_array):
     
     for x in range(1, WIDTH // subdivision_size - 1):
         for y in range(1, HEIGHT // subdivision_size - 1):
-            neighbors = screen_array[x - 1, y - 1] + screen_array[x, y - 1] + screen_array[x + 1, y - 1] + screen_array[x - 1, y] + screen_array[x + 1, y] + screen_array[x - 1, y + 1] + screen_array[x, y + 1] + screen_array[x + 1, y + 1]
+            neighbors =(screen_array[x - 1, y - 1] + 
+                        screen_array[x, y - 1] + 
+                        screen_array[x + 1, y - 1] + 
+                        screen_array[x - 1, y] + 
+                        screen_array[x + 1, y] + 
+                        screen_array[x - 1, y + 1] + 
+                        screen_array[x, y + 1] + 
+                        screen_array[x + 1, y + 1])
+
             if screen_array[x, y] == 1:
                 if neighbors < 2:
                     new_screen_array[x, y] = 0
@@ -72,6 +80,8 @@ while running:
             x, y = pygame.mouse.get_pos()
             x = x // subdivision_size
             y = y // subdivision_size
+            if x not in range(2, WIDTH // subdivision_size - 3) or y not in range(2, HEIGHT // subdivision_size - 3):
+                continue
             if event.button == 1:
                 draw_conway_glider_left(x, y)
             elif event.button == 3:
