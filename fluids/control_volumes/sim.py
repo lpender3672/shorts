@@ -21,6 +21,17 @@ def set_bnd(b, x):
     x[-1, 0] = 0.5 * (x[-2, 0] + x[-1, 1])
     x[-1, -1] = 0.5 * (x[-2, -1] + x[-1, -2])
 
+# add wall
+@numba.njit
+def add_wall(x, Vx, Vy, wall_pos, wall_normal):
+    # wall normal is a unit vector
+    # wall_pos is a point on the wall
+    # set velocity normal to wall to 0
+    # set density of and behind wall to 0
+    
+    pass
+
+
 # linear solver
 @numba.njit
 def lin_solve(b, x, x0, a, c, N, iters=20):
@@ -166,10 +177,10 @@ class fluid():
         for t in np.arange(0, T, self.dt):
             Nc = self.N//2
             self.addDensity(Nc, Nc, 1000)
-            V = 1
+            V = .1
             vx = V * np.sin(2 * np.pi * t / 10)
             vy = V * np.cos(2 * np.pi * t / 10)
-            self.addVelocity(Nc, Nc, vx, vy)
+            self.addVelocity(Nc, Nc, V, vy)
             self.step()
 
             if np.isclose(t % (interval/1000), 0):
@@ -179,12 +190,12 @@ class fluid():
         # animation function
         ani = animation.ArtistAnimation(fig, ims, interval=interval, blit=True, repeat_delay=1000)
         plt.show()
-        ani.save('fluids/control_volumes/animation.gif')
+        #ani.save('fluids/control_volumes/animation_2D.gif')
     
 
 
 if __name__ == "__main__":
-    mu = 0.001
+    mu = 0.0001
     diff = 0.0001
-    f = fluid(64, mu, diff, 0.01)
-    f.animate(10, 20)
+    f = fluid(64, mu, diff, 0.1)
+    f.animate(100, 20)
