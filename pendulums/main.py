@@ -40,10 +40,12 @@ path = False
 
 px, py = width / 2, height / 3
 
-pendulums = n_pendulums(100, singlependulum, [px, py], np.pi*10**-5)
+#pendulums = []
+pendulums = n_pendulums(100, doublependulum, [px, py], np.pi*10**-8)
 
 #EP = elasticpendulum([px, py], 1, 200, 50, 200, np.pi/2)
 #DP = doublependulum([px, py], 200, np.pi/2, np.pi/2, BLUE)
+#pendulums.append(DP)
 
 points = []
 

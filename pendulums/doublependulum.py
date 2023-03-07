@@ -14,8 +14,8 @@ class doublependulum(object):
         self.pos = pos
         self.l = l
 
-        self.P1 = pendulum(pos, l, a1)
-        self.P2 = pendulum(self.P1.getpos(), l, a2)
+        self.P1 = pendulum(pos, l, a1, colour=colour)
+        self.P2 = pendulum(self.P1.getpos(), l, a2, colour=colour)
 
         self.colour = colour
 
@@ -39,5 +39,5 @@ class doublependulum(object):
 
     def draw(self, surface):
 
-        self.P1.draw(surface, self.colour)
-        self.P2.draw(surface, self.colour)
+        self.P1.draw(surface)
+        self.P2.draw(surface)

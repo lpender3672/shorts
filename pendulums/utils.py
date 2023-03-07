@@ -52,13 +52,13 @@ def n_pendulums(n, pendulum_class, pos, arange, lrange = 0):
                     int(255*min(1.0, B))    )
 
         if pendulum_class == singlependulum:
-            pendulums.append(pendulum_class(pos, l[i], a[i], 0, colour))
+            pendulums.append(pendulum_class(pos, l[i], a[i], 0, colour=colour))
         
         elif pendulum_class == elasticpendulum:
-            pendulums.append(pendulum_class(pos, 0.5, l[i], 20, l[i], a[i], 0, 0, colour))
+            pendulums.append(pendulum_class(pos, 0.5, l[i], 20, l[i], a[i], 0, 0, colour=colour))
         
         elif pendulum_class == doublependulum:
-            pendulums.append(pendulum_class(pos, l[i]/2, a[i], a[i], colour))
+            pendulums.append(pendulum_class(pos, l[i]/2, a[i], a[i], colour=colour))
 
     #l=250
     #P.append(doublependulum([px, py], l, a[i], a[i], colour))
