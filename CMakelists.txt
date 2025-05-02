@@ -1,0 +1,43 @@
+cmake_minimum_required(VERSION 3.10)
+project(ReactionDiffusion)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Use MSYS2 MinGW64 paths
+set(CMAKE_PREFIX_PATH "C:/msys64/mingw64")
+
+# Find packages
+find_package(OpenGL REQUIRED)
+find_package(glfw3 REQUIRED)
+find_package(glm REQUIRED)
+
+# Include GLAD manually
+include_directories(
+    glad
+    include
+)
+
+# Source files
+set(SOURCES
+    main.cpp
+    glad/glad.c
+)
+
+add_executable(${PROJECT_NAME} ${SOURCES})
+
+add_library(imgui
+    imgui/imgui.cpp
+    imgui/imgui_draw.cpp
+    imgui/imgui_widgets.cpp
+    imgui/imgui_tables.cpp
+    imgui/backends/imgui_impl_glfw.cpp
+    imgui/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui PUBLIC imgui imgui/backends)
+target_link_libraries(${PROJECT_NAME} imgui glfw OpenGL::GL)
+
+target_link_libraries(${PROJECT_NAME}
+    OpenGL::GL
+    glfw
+)
