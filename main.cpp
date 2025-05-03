@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <thread>
 #include <chrono>
+#include <iomanip>
 
 const unsigned int WIDTH = 800;
 const unsigned int HEIGHT = 800;
@@ -194,110 +195,6 @@ void preserveStateOnResize(GLuint oldTex, GLuint newTex, int oldWidth, int oldHe
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, newWidth, newHeight, GL_RGBA, GL_FLOAT, newData.data());
 }
 
-// Transform simulation state after pan/zoom changes
-void translateState(GLuint tex, int width, int height, float oldZoom, float oldPanX, float oldPanY, float newZoom, float newPanX, float newPanY) {
-    // Make sure we have a valid texture
-    if (tex == 0) {
-        std::cerr << "Error in translateState: Invalid texture ID" << std::endl;
-        return;
-    }
-    
-    // Check for valid dimensions
-    if (width <= 0 || height <= 0) {
-        std::cerr << "Error in translateState: Invalid dimensions" << std::endl;
-        return;
-    }
-    
-    try {
-        // Allocate buffer for the current state data with proper error handling
-        std::vector<float> currentData(width * height * 4, 0.0f);
-        
-        // Make sure we're dealing with the right texture
-        glBindTexture(GL_TEXTURE_2D, tex);
-        
-        // Check for OpenGL errors before the critical call
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            std::cerr << "OpenGL error before glGetTexImage: " << err << std::endl;
-            return;
-        }
-        
-        // Read the current state
-        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, currentData.data());
-        
-        // Check for OpenGL errors after the critical call
-        err = glGetError();
-        if (err != GL_NO_ERROR) {
-            std::cerr << "OpenGL error after glGetTexImage: " << err << std::endl;
-            return;
-        }
-        
-        // Allocate buffer for the transformed state
-        std::vector<float> transformedData(width * height * 4, 0.0f);
-        
-        // Apply the transformation for each pixel in the new view
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                // Convert pixel coordinates to NDC space [0,1]
-                float ndcX = (float)x / width;
-                float ndcY = (float)y / height;
-                
-                // Convert NDC to world space using the new transformation
-                float worldX = (ndcX - 0.5f) / newZoom + 0.5f - newPanX / newZoom;
-                float worldY = (ndcY - 0.5f) / newZoom + 0.5f - newPanY / newZoom;
-                
-                // Convert world space back to NDC using the old transformation
-                float oldNdcX = (worldX + oldPanX / oldZoom - 0.5f) * oldZoom + 0.5f;
-                float oldNdcY = (worldY + oldPanY / oldZoom - 0.5f) * oldZoom + 0.5f;
-                
-                // Convert NDC back to pixel coordinates in the old view
-                int srcX = (int)(oldNdcX * width);
-                int srcY = (int)(oldNdcY * height);
-                
-                // Destination index in transformed data
-                int dstIdx = (y * width + x) * 4;
-                
-                // Check if source coordinates are within bounds
-                if (srcX >= 0 && srcX < width && srcY >= 0 && srcY < height) {
-                    // Source index in current data
-                    int srcIdx = (srcY * width + srcX) * 4;
-                    
-                    // Make sure we're not accessing out of bounds memory
-                    if (srcIdx >= 0 && srcIdx < (width * height * 4) && 
-                        dstIdx >= 0 && dstIdx < (width * height * 4)) {
-                        // Copy the U and V values
-                        transformedData[dstIdx]     = currentData[srcIdx];     // U component
-                        transformedData[dstIdx + 1] = currentData[srcIdx + 1]; // V component
-                        // Components 2 and 3 remain 0.0f
-                    }
-                }
-                // Out of bounds pixels remain at 0
-            }
-        }
-        
-        // Check for errors before uploading texture
-        err = glGetError();
-        if (err != GL_NO_ERROR) {
-            std::cerr << "OpenGL error before texture upload: " << err << std::endl;
-            return;
-        }
-        
-        // Upload the transformed data back to the texture
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_FLOAT, transformedData.data());
-        
-        // Final error check
-        err = glGetError();
-        if (err != GL_NO_ERROR) {
-            std::cerr << "OpenGL error after texture upload: " << err << std::endl;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Exception in translateState: " << e.what() << std::endl;
-    } catch (...) {
-        std::cerr << "Unknown exception in translateState" << std::endl;
-    }
-}
-
 // GPU-accelerated transform of simulation state after pan/zoom changes
 void translateStateGPU(GLuint srcTex, GLuint destTex, int width, int height, float oldZoom, float oldPanX, float oldPanY, float newZoom, float newPanX, float newPanY) {
     // Make sure we have valid textures
@@ -353,29 +250,60 @@ void translateStateGPU(GLuint srcTex, GLuint destTex, int width, int height, flo
     }
 }
 
+// Global recording state variable
+bool isRecording = false;
+int recordingFrameRate = 30;
+float frameInterval = 1.0f / 30.0f;  // Time between captured frames (1/30 second)
+float timeSinceLastCapture = 0.0f;   // Time accumulator for frame capture
+
 FILE* ffmpegPipe = nullptr;
 
 void startFFmpegRecording() {
-    const char* ffmpegCommand = "ffmpeg -y -f rawvideo -vcodec rawvideo -pix_fmt rgba -s 800x800 -r 60 -i - -vf vflip -vcodec libx264 -crf 18 -preset fast output.mp4";
-    ffmpegPipe = _popen(ffmpegCommand, "wb");
+    // Get current date and time for filename
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    tm timeinfo;
+    localtime_s(&timeinfo, &now_c);
+    ss << "recording_" 
+       << std::put_time(&timeinfo, "%Y-%m-%d_%H-%M-%S") 
+       << ".mp4";
+    std::string filename = ss.str();
+    
+    std::string ffmpegCommand = "ffmpeg -y -f rawvideo -vcodec rawvideo -pix_fmt rgba -s " + 
+                               std::to_string(currentWidth) + "x" + std::to_string(currentHeight) + 
+                               " -r " + std::to_string(recordingFrameRate) + " -i - -vf vflip -vcodec libx264 -crf 18 -preset fast " + 
+                               filename;
+    
+    ffmpegPipe = _popen(ffmpegCommand.c_str(), "wb");
     if (!ffmpegPipe) {
         std::cerr << "Failed to open FFmpeg pipe." << std::endl;
-        exit(1);
+        isRecording = false;
+        return;
     }
+    
+    isRecording = true;
+    timeSinceLastCapture = 0.0f;  // Reset the accumulator
+    frameInterval = 1.0f / recordingFrameRate;  // Set interval based on target framerate
+    
+    std::cout << "Started recording to: " << filename << std::endl;
+    std::cout << "Recording at " << recordingFrameRate << " FPS" << std::endl;
 }
 
 void stopFFmpegRecording() {
     if (ffmpegPipe) {
         _pclose(ffmpegPipe);
         ffmpegPipe = nullptr;
+        isRecording = false;
+        std::cout << "Recording stopped." << std::endl;
     }
 }
 
 void captureFrame() {
     if (!ffmpegPipe) return;
 
-    std::vector<unsigned char> pixels(WIDTH * HEIGHT * 4);
-    glReadPixels(0, 0, WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    std::vector<unsigned char> pixels(currentWidth * currentHeight * 4);
+    glReadPixels(0, 0, currentWidth, currentHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
     fwrite(pixels.data(), sizeof(unsigned char), pixels.size(), ffmpegPipe);
 }
 
@@ -478,8 +406,10 @@ void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
         lastMouseY = ypos;
         
         // Check if pan change is significant enough to require state transformation
-        float panChangeThreshold = 0.01f; // Adjust this threshold as needed
+        // Make threshold dependent on zoom factor (smaller threshold at higher zoom)
+        float panChangeThreshold = 0.002f / zoomFactor; 
         if (abs(panX - prevPanX) > panChangeThreshold || abs(panY - prevPanY) > panChangeThreshold) {
+            // Store current state for transformation
             needsStateTransform = true;
         }
     }
@@ -573,6 +503,21 @@ void processInput(GLFWwindow* window) {
     } else {
         rKeyPressed = false;
     }
+
+    // Toggle recording with 'P' key
+    static bool pKeyPressed = false;
+    if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS) {
+        if (!pKeyPressed) {
+            pKeyPressed = true;
+            if (isRecording) {
+                stopFFmpegRecording();
+            } else {
+                startFFmpegRecording();
+            }
+        }
+    } else {
+        pKeyPressed = false;
+    }
 }
 
 int main() {
@@ -606,9 +551,10 @@ int main() {
     ImGui_ImplGlfw_InitForOpenGL(win, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    simShader = createProgram("shaders/pass_vert.glsl", "shaders/rd_frag.glsl");
-    visShader = createProgram("shaders/pass_vert.glsl", "shaders/rd_visual.glsl");
-    transformShader = createProgram("shaders/pass_vert.glsl", "shaders/transform_frag.glsl");
+    // Shaders ../ because of CMake build directory structure
+    simShader = createProgram("../shaders/pass_vert.glsl", "../shaders/rd_frag.glsl");
+    visShader = createProgram("../shaders/pass_vert.glsl", "../shaders/rd_visual.glsl");
+    transformShader = createProgram("../shaders/pass_vert.glsl", "../shaders/transform_frag.glsl");
 
     setupQuad();
 
@@ -641,8 +587,6 @@ int main() {
     float diffU = 0.16f;
     float diffV = 0.08f;
     float dt = 0.1f;
-
-    //startFFmpegRecording();
 
     while (!glfwWindowShouldClose(win)) {
         glfwPollEvents();
@@ -682,10 +626,25 @@ int main() {
             
             // Pan and zoom controls
             if (ImGui::CollapsingHeader("Pan & Zoom Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+                // Store previous values before sliders are modified
+                float oldZoom = zoomFactor;
+                float oldPanX = panX;
+                float oldPanY = panY;
+                
+                // UI sliders
                 ImGui::SliderFloat("Zoom", &zoomFactor, 0.1f, 10.0f);
                 ImGui::SliderFloat("Pan X", &panX, -2.0f, 2.0f);
                 ImGui::SliderFloat("Pan Y", &panY, -2.0f, 2.0f);
                 ImGui::SliderFloat("Zoom Speed", &mouseWheelSensitivity, 0.01f, 0.5f);
+                
+                // Check if values changed significantly via ImGui sliders
+                if (abs(zoomFactor - oldZoom) > 0.001f || abs(panX - oldPanX) > 0.001f || abs(panY - oldPanY) > 0.001f) {
+                    // Store values for transformation
+                    prevZoomFactor = oldZoom;
+                    prevPanX = oldPanX;
+                    prevPanY = oldPanY;
+                    needsStateTransform = true;
+                }
                 
                 if (ImGui::Button("Reset Pan/Zoom")) {
                     // Store current state for transformation
@@ -793,7 +752,11 @@ int main() {
             panX = 0.0f;
             panY = 0.0f;
             zoomFactor = 1.0f;
-            //std::cout << "Applied GPU-accelerated state transformation" << std::endl;
+            
+            // Add debug output showing the final bounds of our view
+            std::cout << "View reset - World space bounds: ["
+                      << -1.0f/zoomFactor + panX << ", " << 1.0f/zoomFactor + panX << "] x ["
+                      << -1.0f/zoomFactor + panY << ", " << 1.0f/zoomFactor + panY << "]" << std::endl;
         }
 
         if (frameTime >= fpsUpdateInterval) {
@@ -814,11 +777,19 @@ int main() {
             }
         }
 
+        // Capture frame for recording
+        if (isRecording) {
+            timeSinceLastCapture += deltaTime;
+            if (timeSinceLastCapture >= frameInterval) {
+                captureFrame();
+                timeSinceLastCapture -= frameInterval; // Subtract interval instead of resetting to 0
+                                                       // This maintains better timing accuracy for recordings
+            }
+        }
+
         // Ensure ImGui is rendered after all other OpenGL rendering
         glfwSwapBuffers(win);
     }
-
-    //stopFFmpegRecording();
 
     // Cleanup ImGui
     ImGui_ImplOpenGL3_Shutdown();
