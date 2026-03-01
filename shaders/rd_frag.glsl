@@ -3,28 +3,23 @@
 out vec4 FragColor;
 in vec2 TexCoords;
 
-uniform sampler2D currentState; // Input texture: current state (R in .r, B in .g)
-uniform vec2 dx;               // Grid spacing (normalized)
-uniform float feed;             // Feed rate (F)
-uniform float kill;             // Kill rate (k)
-uniform float diffU;            // Diffusion rate of U (du)
-uniform float diffV;            // Diffusion rate of V (dv)
-uniform float dt;               // Time step
-uniform float zoomFactor = 1.0; // Zoom factor (default: 1.0)
-uniform vec2 panOffset = vec2(0.0, 0.0); // Pan offset (default: 0, 0)
+uniform sampler2D currentState; // R=U, G=V (system 1)  B=W, A=X (system 2)
+uniform vec2 dx;
+uniform float feed,  kill;   // system 1
+uniform float feed2, kill2;  // system 2
+uniform float diffU, diffV, diffW, diffX;
+uniform float dt;
 
-// Adjusted laplacian function for pan/zoom
-vec2 laplacian(vec2 uv) {
-    // We need to adjust the sampling offsets to account for zoom factor
-    vec2 adjustedDx = dx / zoomFactor;
-    
-    vec2 sum = vec2(0.0);
-    sum += texture(currentState, TexCoords + vec2(-adjustedDx.x, 0.0)).rg;
-    sum += texture(currentState, TexCoords + vec2(adjustedDx.x, 0.0)).rg;
-    sum += texture(currentState, TexCoords + vec2(0.0, -adjustedDx.y)).rg;
-    sum += texture(currentState, TexCoords + vec2(0.0, adjustedDx.y)).rg;
-    sum -= 4.0 * uv;
-    return sum;
+// Coupling
+uniform float inhibit;   // cross-inhibition: each activator suppresses the other's growth
+uniform float crossfeed; // cross-feeding:    V boosts W's fuel supply (system 1 feeds system 2)
+
+vec4 laplacian(vec4 centre) {
+    vec4 sum = texture(currentState, TexCoords + vec2(-dx.x,  0.0))
+             + texture(currentState, TexCoords + vec2( dx.x,  0.0))
+             + texture(currentState, TexCoords + vec2(  0.0, -dx.y))
+             + texture(currentState, TexCoords + vec2(  0.0,  dx.y));
+    return sum - 4.0 * centre;
 }
 
 float rand(vec2 co) {
@@ -33,34 +28,41 @@ float rand(vec2 co) {
 
 void main()
 {
-    // Check if we're sampling outside the [0,1] range and clamp if needed
-    if (TexCoords.x < 0.0 || TexCoords.x > 1.0 || TexCoords.y < 0.0 || TexCoords.y > 1.0) {
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-        return;
+    vec4 s = texture(currentState, TexCoords);
+    float u = s.r, v = s.g, w = s.b, x = s.a;
+
+    // Continuous noise seeds to keep patterns alive
+    if (length(TexCoords - vec2(0.50, 0.50)) < 0.012) {
+        u += rand(TexCoords)        * 0.001;
+        v += rand(TexCoords + 0.10) * 0.001;
+    }
+    if (length(TexCoords - vec2(0.33, 0.67)) < 0.012) {
+        w += rand(TexCoords + 0.20) * 0.001;
+        x += rand(TexCoords + 0.30) * 0.001;
     }
 
-    vec2 uv = texture(currentState, TexCoords).rg; // U in r, V in g
+    vec4 lap = laplacian(s);
 
-    // Convert texture coordinates to world coordinates for noise application
-    vec2 worldCoords = (TexCoords - 0.5) * zoomFactor + 0.5;
-    
-    // Add random noise only if within a circle of unit radius
-    if (length(worldCoords - vec2(0.5)) <= 0.01) {
-        uv += vec2(rand(worldCoords), rand(worldCoords)) * 0.001;
-    }
+    float ruv = u * v * v;
+    float rwx = w * x * x;
 
-    vec2 lap = laplacian(uv);
+    // --- Coupling terms ---
+    // Cross-inhibition: each activator directly kills the other
+    float inhibit_v = inhibit * v * x;   // X suppresses V
+    float inhibit_x = inhibit * x * v;   // V suppresses X
 
-    float u = uv.x;
-    float v = uv.y;
+    // Cross-feeding: V's presence replenishes W's fuel.
+    // System 1 "produces" something system 2 can consume.
+    float boosted_feedW = feed2 + crossfeed * v;
 
-    float reaction = u * v * v;
+    // --- Reaction-diffusion equations ---
+    float du = diffU * lap.r - ruv + feed  * (1.0 - u);
+    float dv = diffV * lap.g + ruv - (feed  + kill)  * v - inhibit_v;
+    float dw = diffW * lap.b - rwx + boosted_feedW * (1.0 - w);
+    float dx_ = diffX * lap.a + rwx - (feed2 + kill2) * x - inhibit_x;
 
-    float du = diffU * lap.x - reaction + feed * (1.0 - u);
-    float dv = diffV * lap.y + reaction - (feed + kill) * v;
-
-    u += du * dt;
-    v += dv * dt;
-
-    FragColor = vec4(u, v, 0.0, 1.0); // Store U in red, V in green
+    FragColor = vec4(u + du * dt,
+                     v + dv * dt,
+                     w + dw * dt,
+                     x + dx_ * dt);
 }
