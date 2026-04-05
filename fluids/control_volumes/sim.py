@@ -174,6 +174,8 @@ class fluid():
     def animate(self, T, interval):
         fig = plt.figure()
         ims = []
+        max_density = - np.inf
+        min_density = np.inf
         for t in np.arange(0, T, self.dt):
             Nc = self.N//2
             self.addDensity(Nc, Nc, 1000)
@@ -183,9 +185,15 @@ class fluid():
             self.addVelocity(Nc, Nc, V, vy)
             self.step()
 
+            max_density = max(max_density, np.max(self.density))
+            min_density = min(min_density, np.min(self.density))
+
             if np.isclose(t % (interval/1000), 0):
                 im = plt.imshow(self.density**2, cmap="hot", interpolation="nearest")
                 ims.append([im])
+
+            # set colorbar limits
+            plt.clim(0, 1e6)
         
         # animation function
         ani = animation.ArtistAnimation(fig, ims, interval=interval, blit=True, repeat_delay=1000)

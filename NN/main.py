@@ -152,7 +152,7 @@ def animate(i):
     data = net.history[i % len(net.history)]
     color = np.less(data, 0.5).reshape(200, 1).astype(int)
     color = np.array([[0, 0, 1] if c == 1 else [1, 0, 0] for c in color])
-    scatter.set_color(color)
+    scatter.set_color(color.reshape(200, 3))
     boundary_line.set_ydata(y_boundary_lines[i % len(y_boundary_lines)])
     return scatter
 
